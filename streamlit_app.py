@@ -22,7 +22,7 @@ np.random.seed(42)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="ATM Profitability Intelligence | Diebold Nixdorf",
+    page_title="ATM Profitability & Operational Excellence | Diebold Nixdorf",
     page_icon="🏧",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -284,8 +284,8 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption(f"📊 Illustrative demo data · {CURR_MONTH_DISPLAY}")
-    st.caption("Kala Boudreaux | Jordan Ude")
-    st.caption("Snowflake Account Team")
+    st.caption("Prepared for Frank Baur (EVP & COO) · Tyler Wise (Finance)")
+    st.caption("Kala Boudreaux | Jordan Ude — Snowflake Account Team")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -313,10 +313,11 @@ prev_f = filtered_monthly[filtered_monthly["month_str"] == PREV_MONTH_STR]
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-title">🏧 ATM Profitability Intelligence Platform</div>
+  <div class="hero-title">🏧 ATM Profitability &amp; Operational Excellence Platform</div>
   <div class="hero-sub">
     Diebold Nixdorf × Snowflake &nbsp;·&nbsp; Powered by Cortex AI
-    &nbsp;·&nbsp; POC Demonstration for Tyler Wise &amp; Finance Leadership
+    &nbsp;·&nbsp; Source → Make → Deliver, quantified at the site level
+    &nbsp;·&nbsp; Prepared for Frank Baur (EVP &amp; COO) and Tyler Wise (Finance)
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -325,11 +326,12 @@ st.markdown("""
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Executive Overview",
     "🏧 Site P&L",
     "🏦 Customer Analytics",
-    "🎯 Price vs. Cost Diagnostic",
+    "🎯 Prescriptive Diagnostics",
+    "🧭 Operational Excellence",
     "🗺️ Geographic View",
     "🤖 AI Insights",
     "⚙️ Architecture & Roadmap",
@@ -799,158 +801,360 @@ with tab3:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 4 — PRICE VS. COST DIAGNOSTIC & PRESCRIPTIVE RECOMMENDATIONS
+# TAB 4 — PRESCRIPTIVE DIAGNOSTICS ENGINE
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab4:
-    st.subheader("🎯 Is It a Price Problem or a Cost Problem?")
+    st.subheader("🎯 Prescriptive Diagnostics Engine")
     st.caption(
-        "For every unprofitable site, the agent classifies the root cause against "
-        "Diebold's own national install base — no external data required — then "
-        "recommends a specific action."
+        "This is the agent Diebold's Finance and Ops teams would run every month: it identifies "
+        "*which* sites are underperforming, diagnoses *why* against Diebold's own national fleet as "
+        "the benchmark — no external data required — and prescribes a specific, ranked action. "
+        "Adjust the sensitivity below and re-run the scan."
     )
 
     diag_month = curr_f.copy()
 
-    # Peer benchmark = same ATM model type, nationwide (DN's own fleet as the benchmark)
-    peer_bench = (
-        diag_month.groupby("atm_type")
-        .agg(
-            peer_rev_per_txn=("total_revenue", lambda x: x.sum() / diag_month.loc[x.index, "txn_count"].sum()),
-            peer_calls=("service_calls", "mean"),
+    st.markdown("**Step 1 — Set diagnostic sensitivity**")
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        margin_floor = st.slider(
+            "Flag sites below this margin %", min_value=5, max_value=30, value=20, step=1,
+            key="margin_floor",
         )
-        .reset_index()
-    )
-
-    site_diag = (
-        diag_month.groupby(["site_id", "city", "region", "bank_customer", "atm_type", "install_year"])
-        .agg(
-            revenue=("total_revenue", "sum"),
-            txns=("txn_count", "sum"),
-            net_income=("net_income", "sum"),
-            margin_pct=("margin_pct", "mean"),
-            service_calls=("service_calls", "sum"),
+    with s2:
+        price_threshold = st.slider(
+            "Pricing-issue trigger: rev/txn vs. peer", min_value=-30, max_value=-5, value=-12, step=1,
+            format="%d%%", key="price_threshold",
         )
-        .reset_index()
-        .merge(peer_bench, on="atm_type")
-    )
-    site_diag["rev_per_txn"]   = site_diag["revenue"] / site_diag["txns"]
-    site_diag["price_gap_pct"] = (site_diag["rev_per_txn"] - site_diag["peer_rev_per_txn"]) / site_diag["peer_rev_per_txn"] * 100
-    site_diag["call_gap_pct"]  = (site_diag["service_calls"] - site_diag["peer_calls"]) / site_diag["peer_calls"] * 100
+    with s3:
+        cost_threshold = st.slider(
+            "Cost-issue trigger: call rate vs. peer", min_value=15, max_value=75, value=35, step=5,
+            format="+%d%%", key="cost_threshold",
+        )
 
-    PRICE_THRESHOLD = -12   # revenue/txn this far below peer avg = pricing issue
-    COST_THRESHOLD  = 35    # call rate this far above peer avg = cost issue
+    run_scan = st.button("🔍 Run Diagnostic Scan", type="primary", use_container_width=False)
+    if run_scan:
+        with st.spinner("Cortex AI scanning fleet against peer benchmarks..."):
+            time.sleep(0.8)
+        st.session_state["scan_run"] = True
 
-    def classify(row):
-        is_price_issue = row["price_gap_pct"] <= PRICE_THRESHOLD
-        is_cost_issue  = row["call_gap_pct"]  >= COST_THRESHOLD
-        if is_price_issue and is_cost_issue:
-            return "Both"
-        if is_price_issue:
-            return "Pricing Issue"
-        if is_cost_issue:
-            return "Cost Issue"
-        return "Healthy"
+    if not st.session_state.get("scan_run"):
+        st.info("Set your thresholds above and click **Run Diagnostic Scan** to generate the prescriptive action list.")
+    else:
+        # Peer benchmark = same ATM model type, nationwide (DN's own fleet as the benchmark)
+        peer_bench = (
+            diag_month.groupby("atm_type")
+            .agg(
+                peer_rev_per_txn=("total_revenue", lambda x: x.sum() / diag_month.loc[x.index, "txn_count"].sum()),
+                peer_calls=("service_calls", "mean"),
+            )
+            .reset_index()
+        )
 
-    def recommend(row):
-        if row["diagnosis"] == "Pricing Issue":
-            return f"Flag for contract repricing — revenue/txn is {abs(row['price_gap_pct']):.0f}% below the {row['atm_type']} fleet average."
-        if row["diagnosis"] == "Cost Issue":
-            return f"Escalate to maintenance — call rate is {row['call_gap_pct']:.0f}% above fleet average; evaluate part failure pattern or machine replacement."
-        if row["diagnosis"] == "Both":
-            return "Review contract AND escalate maintenance — both revenue and cost are out of range vs. peers."
-        return "Within normal range — no action needed."
+        site_diag = (
+            diag_month.groupby(["site_id", "city", "region", "bank_customer", "atm_type", "install_year"])
+            .agg(
+                revenue=("total_revenue", "sum"),
+                txns=("txn_count", "sum"),
+                net_income=("net_income", "sum"),
+                margin_pct=("margin_pct", "mean"),
+                service_calls=("service_calls", "sum"),
+            )
+            .reset_index()
+            .merge(peer_bench, on="atm_type")
+        )
+        site_diag["rev_per_txn"]   = site_diag["revenue"] / site_diag["txns"]
+        site_diag["price_gap_pct"] = (site_diag["rev_per_txn"] - site_diag["peer_rev_per_txn"]) / site_diag["peer_rev_per_txn"] * 100
+        site_diag["call_gap_pct"]  = (site_diag["service_calls"] - site_diag["peer_calls"]) / site_diag["peer_calls"] * 100
 
-    site_diag["diagnosis"]       = site_diag.apply(classify, axis=1)
-    site_diag["recommendation"]  = site_diag.apply(recommend, axis=1)
-    unprofitable = site_diag[site_diag["margin_pct"] < 20].sort_values("margin_pct").copy()
+        def classify(row):
+            is_price_issue = row["price_gap_pct"] <= price_threshold
+            is_cost_issue  = row["call_gap_pct"]  >= cost_threshold
+            if is_price_issue and is_cost_issue:
+                return "Both"
+            if is_price_issue:
+                return "Pricing Issue"
+            if is_cost_issue:
+                return "Cost Issue"
+            return "Healthy"
 
-    n_pricing = (unprofitable["diagnosis"] == "Pricing Issue").sum()
-    n_cost    = (unprofitable["diagnosis"] == "Cost Issue").sum()
-    n_both    = (unprofitable["diagnosis"] == "Both").sum()
+        def recommend(row):
+            if row["diagnosis"] == "Pricing Issue":
+                return (f"Flag for contract repricing at next renewal — revenue/txn is "
+                         f"{abs(row['price_gap_pct']):.0f}% below the {row['atm_type']} fleet average.")
+            if row["diagnosis"] == "Cost Issue":
+                return (f"Escalate to field maintenance — call rate is {row['call_gap_pct']:.0f}% above fleet "
+                         f"average; evaluate part-failure pattern or schedule machine replacement.")
+            if row["diagnosis"] == "Both":
+                return "Review contract AND escalate maintenance — both revenue and cost are out of range vs. peers."
+            return "Within normal range — no action needed."
 
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Sites Below 20% Margin", f"{len(unprofitable):,}")
-    d2.metric("→ Pricing Issue", f"{n_pricing:,}", "reprice at renewal")
-    d3.metric("→ Cost Issue", f"{n_cost:,}", "escalate to maintenance")
-    d4.metric("→ Both", f"{n_both:,}", "review contract + ops")
+        def priority(row):
+            if row["diagnosis"] == "Both":
+                return 1
+            if row["diagnosis"] in ("Pricing Issue", "Cost Issue"):
+                return 2
+            return 3
 
-    st.markdown("**Worst 15 sites — diagnosis and recommended action**")
-    show_cols = unprofitable.head(15)[[
-        "site_id", "city", "bank_customer", "atm_type", "margin_pct",
-        "price_gap_pct", "call_gap_pct", "diagnosis", "recommendation",
-    ]].rename(columns={
-        "site_id":        "Site ID",
-        "city":           "Market",
-        "bank_customer":  "Bank",
-        "atm_type":       "ATM Model",
-        "margin_pct":     "Margin %",
-        "price_gap_pct":  "Rev/Txn vs Peer %",
-        "call_gap_pct":   "Call Rate vs Peer %",
-        "diagnosis":      "Diagnosis",
-        "recommendation": "Recommended Action",
-    })
-    st.dataframe(
-        show_cols,
-        use_container_width=True,
-        height=430,
-        hide_index=True,
-        column_config={
-            "Margin %":            st.column_config.NumberColumn(format="%.1f%%"),
-            "Rev/Txn vs Peer %":   st.column_config.NumberColumn(format="%+.0f%%"),
-            "Call Rate vs Peer %": st.column_config.NumberColumn(format="%+.0f%%"),
-        },
-    )
+        site_diag["diagnosis"]      = site_diag.apply(classify, axis=1)
+        site_diag["recommendation"] = site_diag.apply(recommend, axis=1)
+        site_diag["priority"]       = site_diag.apply(priority, axis=1)
+        unprofitable = (
+            site_diag[site_diag["margin_pct"] < margin_floor]
+            .sort_values(["priority", "margin_pct"])
+            .copy()
+        )
 
-    reprice_upside = (
-        unprofitable[unprofitable["diagnosis"].isin(["Pricing Issue", "Both"])]
-        .assign(potential=lambda d: d["revenue"] * (abs(d["price_gap_pct"]) / 100) * 0.5)
-        ["potential"].sum()
-    )
-    st.markdown(f"""
+        n_pricing = (unprofitable["diagnosis"] == "Pricing Issue").sum()
+        n_cost    = (unprofitable["diagnosis"] == "Cost Issue").sum()
+        n_both    = (unprofitable["diagnosis"] == "Both").sum()
+
+        st.markdown("**Step 2 — Scan results**")
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric(f"Sites Below {margin_floor}% Margin", f"{len(unprofitable):,}")
+        d2.metric("→ Pricing Issue", f"{n_pricing:,}", "reprice at renewal")
+        d3.metric("→ Cost Issue", f"{n_cost:,}", "escalate to maintenance")
+        d4.metric("→ Both", f"{n_both:,}", "review contract + ops")
+
+        tbl_tab, action_tab = st.tabs(["📋 Full ranked list", "📝 Action cards — top 5 priority sites"])
+
+        with tbl_tab:
+            show_cols = unprofitable[[
+                "site_id", "city", "bank_customer", "atm_type", "margin_pct",
+                "price_gap_pct", "call_gap_pct", "diagnosis", "recommendation",
+            ]].rename(columns={
+                "site_id":        "Site ID",
+                "city":           "Market",
+                "bank_customer":  "Bank",
+                "atm_type":       "ATM Model",
+                "margin_pct":     "Margin %",
+                "price_gap_pct":  "Rev/Txn vs Peer %",
+                "call_gap_pct":   "Call Rate vs Peer %",
+                "diagnosis":      "Diagnosis",
+                "recommendation": "Recommended Action",
+            })
+            st.dataframe(
+                show_cols,
+                use_container_width=True,
+                height=420,
+                hide_index=True,
+                column_config={
+                    "Margin %":            st.column_config.NumberColumn(format="%.1f%%"),
+                    "Rev/Txn vs Peer %":   st.column_config.NumberColumn(format="%+.0f%%"),
+                    "Call Rate vs Peer %": st.column_config.NumberColumn(format="%+.0f%%"),
+                },
+            )
+            st.download_button(
+                "⬇️ Download full action list (CSV)",
+                data=show_cols.to_csv(index=False).encode("utf-8"),
+                file_name="atm_prescriptive_action_list.csv",
+                mime="text/csv",
+            )
+
+        with action_tab:
+            DIAG_ICON = {"Both": "🔴", "Pricing Issue": "🟠", "Cost Issue": "🟡", "Healthy": "🟢"}
+            for _, row in unprofitable.head(5).iterrows():
+                with st.expander(
+                    f"{DIAG_ICON.get(row['diagnosis'], '⚪')} {row['site_id']} — {row['city']} "
+                    f"({row['bank_customer']}) · Margin {row['margin_pct']:.1f}%",
+                    expanded=False,
+                ):
+                    ac1, ac2, ac3 = st.columns(3)
+                    ac1.metric("ATM Model", row["atm_type"])
+                    ac2.metric("Rev/Txn vs Peer", f"{row['price_gap_pct']:+.0f}%")
+                    ac3.metric("Call Rate vs Peer", f"{row['call_gap_pct']:+.0f}%")
+                    st.markdown(f"**Diagnosis:** {row['diagnosis']}")
+                    st.markdown(f"**Prescribed action:** {row['recommendation']}")
+                    st.markdown(f"**Install year:** {int(row['install_year'])} · **Region:** {row['region']}")
+
+        st.markdown("---")
+        st.markdown("**Step 3 — What-if: simulate fixing the pricing-issue sites**")
+        fix_pct = st.slider(
+            "% of flagged pricing-issue sites repriced to the fleet benchmark this quarter",
+            min_value=0, max_value=100, value=50, step=5, key="fix_pct",
+        )
+        reprice_upside = (
+            unprofitable[unprofitable["diagnosis"].isin(["Pricing Issue", "Both"])]
+            .assign(potential=lambda d: d["revenue"] * (abs(d["price_gap_pct"]) / 100) * (fix_pct / 100))
+            ["potential"].sum()
+        )
+        w1, w2 = st.columns(2)
+        w1.metric("Projected monthly recapture (this sample)", f"${reprice_upside:,.0f}")
+        w2.metric("Projected annualized recapture", f"${reprice_upside * 12:,.0f}")
+
+        st.markdown(f"""
 <div class="insight-box">
-<strong>💡 Prescriptive insight:</strong> Repricing the {n_pricing + n_both} flagged pricing-issue sites
-to the regional/model benchmark would recapture an estimated
+<strong>💡 Prescriptive insight:</strong> Repricing {fix_pct}% of the {n_pricing + n_both} flagged
+pricing-issue sites to the regional/model benchmark recaptures an estimated
 <strong>${reprice_upside:,.0f}/month</strong> in this sample — scaled across Diebold's full fleet,
 this is the same mechanism behind the <strong>$11–22M/yr pricing-accuracy opportunity</strong>
 in the POC business case. Cost-issue sites are candidates for parts/labor review rather than repricing —
-conflating the two is the "blame game" this diagnostic eliminates.
+conflating the two is the "blame game" this engine eliminates.
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.subheader("🧭 Golden Ratio — Optimal Machine Mix (Directional)")
-    st.caption("Given technician capacity and service density in a market, what mix of machine types maximizes margin without adding headcount?")
+        st.markdown("---")
+        st.subheader("🧭 Golden Ratio — Optimal Machine Mix (Directional)")
+        st.caption("Given technician capacity and service density in a market, what mix of machine types maximizes margin without adding headcount?")
 
-    mix = (
-        diag_month.groupby(["region", "atm_type"])
-        .agg(sites=("site_id", "nunique"), avg_margin=("margin_pct", "mean"))
-        .reset_index()
-    )
-    mix_chart = (
-        alt.Chart(mix)
-        .mark_bar()
-        .encode(
-            x=alt.X("sites:Q", title="# Sites", stack="normalize"),
-            y=alt.Y("region:N", title=None),
-            color=alt.Color("atm_type:N", title="ATM Model", legend=alt.Legend(orient="bottom", columns=3)),
-            tooltip=["region:N", "atm_type:N", "sites:Q",
-                     alt.Tooltip("avg_margin:Q", title="Avg Margin %", format=".1f")],
+        mix = (
+            diag_month.groupby(["region", "atm_type"])
+            .agg(sites=("site_id", "nunique"), avg_margin=("margin_pct", "mean"))
+            .reset_index()
         )
-        .properties(height=260)
-    )
-    st.altair_chart(mix_chart, use_container_width=True)
-    st.caption(
-        "Regions skewed toward Legacy Cash Dispensers (lowest-margin model) are the first candidates "
-        "for fleet-refresh prioritization — this view is what unlocks that conversation."
-    )
+        mix_chart = (
+            alt.Chart(mix)
+            .mark_bar()
+            .encode(
+                x=alt.X("sites:Q", title="# Sites", stack="normalize"),
+                y=alt.Y("region:N", title=None),
+                color=alt.Color("atm_type:N", title="ATM Model", legend=alt.Legend(orient="bottom", columns=3)),
+                tooltip=["region:N", "atm_type:N", "sites:Q",
+                         alt.Tooltip("avg_margin:Q", title="Avg Margin %", format=".1f")],
+            )
+            .properties(height=260)
+        )
+        st.altair_chart(mix_chart, use_container_width=True)
+        st.caption(
+            "Regions skewed toward Legacy Cash Dispensers (lowest-margin model) are the first candidates "
+            "for fleet-refresh prioritization — this view is what unlocks that conversation."
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 5 — GEOGRAPHIC VIEW
+# TAB 5 — OPERATIONAL EXCELLENCE (COO VIEW)
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab5:
+    st.subheader("🧭 Operational Excellence — Source, Make, Deliver")
+    st.caption(
+        "Framed around Diebold Nixdorf's own operating model: regional sourcing resilience, "
+        "field-service efficiency (\"Deliver\"), and the branch cash-automation opportunity that "
+        "physically embodies \"Make.\" Every metric below rolls up from the same site-level data "
+        "used in the tabs to its left — this is what makes it a platform, not a one-off report."
+    )
+
+    ops_month = curr_f.copy()
+
+    st.markdown("---")
+    st.markdown("#### 📦 Source — Regional Resilience")
+    st.caption(
+        "\"In-region for the region\" sourcing reduces exposure to a single geography's disruption. "
+        "This score is a concentration index (lower = more diversified = more resilient) of ATM "
+        "revenue across Diebold's five U.S. regions."
+    )
+
+    reg_share = (
+        ops_month.groupby("region")["total_revenue"].sum()
+        .pipe(lambda s: s / s.sum())
+    )
+    hhi = float((reg_share ** 2).sum() * 10000)   # Herfindahl-Hirschman Index, 0–10,000 scale
+    resilience_label = "High" if hhi < 2200 else ("Moderate" if hhi < 3000 else "Concentrated")
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Revenue Concentration (HHI)", f"{hhi:,.0f}", resilience_label)
+    r2.metric("Largest Single Region Share", f"{reg_share.max() * 100:.1f}%", reg_share.idxmax())
+    r3.metric("Regions Covered", f"{ops_month['region'].nunique()} / 5")
+
+    region_bar = (
+        alt.Chart(reg_share.reset_index().rename(columns={"total_revenue": "share"}))
+        .mark_bar(color="#00447C")
+        .encode(
+            x=alt.X("share:Q", title="Share of Portfolio Revenue", axis=alt.Axis(format="%")),
+            y=alt.Y("region:N", sort="-x", title=None),
+            tooltip=["region:N", alt.Tooltip("share:Q", format=".1%")],
+        )
+        .properties(height=200)
+    )
+    st.altair_chart(region_bar, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("#### 🔧 Deliver — Field Service Efficiency")
+    st.caption(
+        "Uptime and service-call rate are the two levers that translate directly into field "
+        "turnaround time and technician capacity — the operational metrics that sit next to "
+        "revenue in every regional P&L review."
+    )
+
+    avg_uptime_ops   = ops_month["uptime_pct"].mean() if len(ops_month) else 0.0
+    avg_calls_ops    = ops_month["service_calls"].mean() if len(ops_month) else 0.0
+    below_target     = ops_month.groupby("site_id")["uptime_pct"].mean()
+    pct_below_target = (below_target < 97.5).mean() * 100 if len(below_target) else 0.0
+
+    f1, f2, f3 = st.columns(3)
+    f1.metric("Avg Fleet Uptime", f"{avg_uptime_ops:.1f}%", "Target ≥ 97.5%")
+    f2.metric("Sites Below Uptime Target", f"{pct_below_target:.0f}%")
+    f3.metric("Avg Service Calls / Site / Mo", f"{avg_calls_ops:.1f}")
+
+    st.markdown("**Service-call reduction opportunity — what-if**")
+    call_reduction_pct = st.slider(
+        "If field ops reduced excess calls on flagged high-call sites by this much",
+        min_value=0, max_value=75, value=25, step=5, key="call_reduction_pct",
+    )
+    excess_calls = (
+        ops_month.groupby("atm_type")["service_calls"].mean()
+        .pipe(lambda peer: ops_month.merge(peer.rename("peer_calls"), on="atm_type"))
+    )
+    excess_calls["excess"] = (excess_calls["service_calls"] - excess_calls["peer_calls"]).clip(lower=0)
+    calls_saved = excess_calls["excess"].sum() * (call_reduction_pct / 100)
+    COST_PER_CALL = 85  # illustrative fully-loaded technician dispatch cost
+    monthly_savings = calls_saved * COST_PER_CALL
+
+    cs1, cs2 = st.columns(2)
+    cs1.metric("Service Calls Avoided / Month (sample)", f"{calls_saved:,.0f}")
+    cs2.metric("Estimated Monthly Savings (sample)", f"${monthly_savings:,.0f}",
+               f"${monthly_savings * 12:,.0f}/yr")
+
+    st.markdown("---")
+    st.markdown("#### 🏦 Make — The Closed Cash Ecosystem Opportunity")
+    st.caption(
+        "Up to 50% of branch operating expense ties back to cash handling. Migrating Legacy Cash "
+        "Dispensers to DN Series Recyclers / Vynamic TCR turns the ATM into a mini-branch and is the "
+        "single highest-ROI lever Diebold controls directly — independent of any bank contract."
+    )
+
+    fleet_mix = ops_month.groupby("atm_type")["site_id"].nunique().sort_values(ascending=False)
+    legacy_n  = int(fleet_mix.get("Legacy Cash Dispenser", 0))
+    total_n   = int(fleet_mix.sum())
+    legacy_pct = legacy_n / total_n * 100 if total_n else 0.0
+
+    legacy_margin  = ops_month.loc[ops_month["atm_type"] == "Legacy Cash Dispenser", "margin_pct"].mean()
+    recycler_margin = ops_month.loc[ops_month["atm_type"] == "DN Series Recycler", "margin_pct"].mean()
+    margin_lift = (recycler_margin - legacy_margin) if pd.notna(legacy_margin) and pd.notna(recycler_margin) else 0.0
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Legacy Cash Dispensers in Fleet", f"{legacy_n:,}", f"{legacy_pct:.0f}% of sites")
+    m2.metric("Margin Gap vs. Recycler Fleet", f"{margin_lift:+.1f} pts")
+    m3.metric("Avg Legacy Site Margin", f"{legacy_margin:.1f}%" if pd.notna(legacy_margin) else "n/a")
+
+    migrate_pct = st.slider(
+        "% of Legacy Cash Dispensers migrated to DN Series Recycler / Vynamic TCR",
+        min_value=0, max_value=100, value=30, step=5, key="migrate_pct",
+    )
+    legacy_rev = ops_month.loc[ops_month["atm_type"] == "Legacy Cash Dispenser", "total_revenue"].sum()
+    migration_lift = legacy_rev * (migrate_pct / 100) * (margin_lift / 100)
+    st.metric(
+        f"Projected monthly net-income lift from migrating {migrate_pct}% of Legacy units",
+        f"${max(migration_lift, 0):,.0f}",
+    )
+
+    st.markdown(f"""
+<div class="insight-box">
+<strong>💡 For the COO:</strong> Frank Baur's own framing — <em>"What gets measured improves,
+but what gets understood transforms"</em> — is the thesis of this platform. Diebold already runs
+DNAccelerator as its lean operating system on the shop floor; this extends the same measure →
+understand → act discipline to the field, turning site-level P&L, service-call, and fleet-mix data
+into a standing prescriptive engine rather than a monthly static report.
+</div>
+""", unsafe_allow_html=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 6 — GEOGRAPHIC VIEW
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab6:
     st.subheader("Geographic ATM Profitability Map")
     st.caption("Site-level map view — identify underperforming markets at a glance")
 
@@ -1038,10 +1242,10 @@ with tab5:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 6 — AI INSIGHTS
+# TAB 7 — AI INSIGHTS
 # ═════════════════════════════════════════════════════════════════════════════
 
-with tab6:
+with tab7:
     st.subheader("🤖 Cortex AI — Natural Language ATM Analytics")
     st.caption(
         "Ask any question about your ATM portfolio in plain English. "
@@ -1241,10 +1445,10 @@ or Power BI report requests.
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 7 — ARCHITECTURE
+# TAB 8 — ARCHITECTURE
 # ═════════════════════════════════════════════════════════════════════════════
 
-with tab7:
+with tab8:
     st.subheader("Solution Architecture")
     st.caption("Replacing the current Alteryx + Power BI stack with Snowflake + Cortex AI")
 
@@ -1351,8 +1555,15 @@ Consumer Interfaces
 <div class="insight-box">
 <strong>💡 Why this matters now:</strong> DN's own Q2 2026 results show Service gross margin
 under pressure from fleet investment, alongside a 30% margin floor and 100 bps YoY margin-growth
-target. The price-vs-cost diagnostic and site-level P&L visibility in this platform speak directly
+target. The prescriptive diagnostics and site-level P&L visibility in this platform speak directly
 to that pressure — turning a monthly, backward-looking Finance exercise into a daily, self-service
 one for every account manager.
+</div>
+
+<div class="insight-box">
+<strong>🧭 For Operations:</strong> This platform is built to sit alongside DNAccelerator, not replace it —
+extending the same lean, measure → understand → act discipline from the shop floor to the field.
+It gives Source (regional sourcing resilience), Make (fleet-mix and cash-automation ROI), and Deliver
+(uptime and service-call efficiency) a shared, site-level data foundation instead of three disconnected reports.
 </div>
 """, unsafe_allow_html=True)
