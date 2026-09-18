@@ -235,12 +235,51 @@ def generate_monthly_pl(sites: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.cache_data
+def generate_market_intel(sites: pd.DataFrame) -> pd.DataFrame:
+    """
+    SIMULATED Snowflake Marketplace-style data: third-party demand and
+    competitor-density signals, joined by market (city). Illustrates the
+    "cross-reference market data to find under-served zip codes" success
+    criterion — in production this would be sourced from Marketplace
+    demographic / foot-traffic / point-of-interest listings, not generated.
+    """
+    dn_by_city = sites.groupby(["region", "city"]).size().rename("dn_sites").reset_index()
+
+    rows = []
+    for _, r in dn_by_city.iterrows():
+        # Demand proxy: adult population (000s) with cash-reliant banking need
+        population_k    = round(np.random.uniform(120, 950), 0)
+        unbanked_rate   = round(np.random.uniform(4.5, 14.0), 1)   # % of population, FDIC-style range
+        # Competitor ATM/self-service footprint from two illustrative competitor networks
+        competitor_a    = max(0, int(np.random.normal(r["dn_sites"] * 0.9, 4)))   # e.g. NCR Voyix-class network
+        competitor_b    = max(0, int(np.random.normal(r["dn_sites"] * 0.6, 3)))   # e.g. Hyosung-class network
+        rows.append({
+            "region": r["region"], "city": r["city"], "dn_sites": r["dn_sites"],
+            "population_k": population_k, "unbanked_rate": unbanked_rate,
+            "competitor_a_sites": competitor_a, "competitor_b_sites": competitor_b,
+        })
+    mi = pd.DataFrame(rows)
+    mi["total_competitor_sites"] = mi["competitor_a_sites"] + mi["competitor_b_sites"]
+    mi["total_market_sites"]     = mi["dn_sites"] + mi["total_competitor_sites"]
+    mi["dn_market_share_pct"]    = (mi["dn_sites"] / mi["total_market_sites"] * 100).round(1)
+    # Demand per existing DN machine — the core "greenfield" signal: high demand,
+    # thin DN presence relative to population and competitor build-out
+    mi["demand_per_dn_site"]     = (mi["population_k"] * (mi["unbanked_rate"] / 10)) / (mi["dn_sites"] + 1)
+    mi["greenfield_score"]       = (
+        mi["demand_per_dn_site"].rank(pct=True) * 0.6
+        + (1 - mi["dn_market_share_pct"].rank(pct=True)) * 0.4
+    ) * 100
+    return mi.round(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD & MERGE DATA
 # ─────────────────────────────────────────────────────────────────────────────
 
 sites_df   = generate_sites()
 monthly_df = generate_monthly_pl(sites_df)
+market_intel_df = generate_market_intel(sites_df)
 
 monthly_full = monthly_df.merge(
     sites_df[[
@@ -332,7 +371,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🏦 Customer Analytics",
     "🎯 Prescriptive Diagnostics",
     "🧭 Operational Excellence",
-    "🗺️ Geographic View",
+    "🗺️ Geographic & Greenfield",
     "🤖 AI Insights",
     "⚙️ Architecture & Roadmap",
 ])
@@ -824,12 +863,12 @@ with tab4:
         )
     with s2:
         price_threshold = st.slider(
-            "Pricing-issue trigger: rev/txn vs. peer", min_value=-30, max_value=-5, value=-12, step=1,
+            "Pricing-issue trigger: rev/txn vs. peer", min_value=-25, max_value=-2, value=-6, step=1,
             format="%d%%", key="price_threshold",
         )
     with s3:
         cost_threshold = st.slider(
-            "Cost-issue trigger: call rate vs. peer", min_value=15, max_value=75, value=35, step=5,
+            "Cost-issue trigger: call rate vs. peer", min_value=10, max_value=60, value=20, step=5,
             format="+%d%%", key="cost_threshold",
         )
 
@@ -1149,6 +1188,49 @@ into a standing prescriptive engine rather than a monthly static report.
 </div>
 """, unsafe_allow_html=True)
 
+    st.markdown("---")
+    st.markdown("#### 🔭 Beyond ATM Profitability — the Services &amp; Implementation Opportunity")
+    st.caption(
+        "The same site-level data foundation extends directly to Diebold's Services & Project "
+        "Management organization — the execution engine behind \"Deliver\" at a much larger scale "
+        "than ATM Profitability alone."
+    )
+
+    bb1, bb2 = st.columns(2)
+    with bb1:
+        st.markdown("**Today — Services & Project Management**")
+        st.error(
+            "- Orders tracked in R12, project execution in OutSystems — no integration between them\n"
+            "- Heavy manual data entry and reconciliation across disconnected systems\n"
+            "- No real-time, end-to-end visibility from order → installation → reporting\n"
+            "- Late-cycle margin swings surface only at financial close\n"
+            "- Revenue leakage flagged as a top priority, not yet instrumented"
+        )
+    with bb2:
+        st.markdown("**What the same platform pattern gives that org**")
+        st.success(
+            "- One data layer spanning order, install, and service — same grain as ATM site P&L\n"
+            "- Revenue leakage and margin erosion surfaced *before* month-end close, not after\n"
+            "- The identical prescriptive-diagnostics pattern (this app's Tab 4) applies directly to "
+            "install-SLA breaches and technician routing, not just ATM pricing/cost issues\n"
+            "- Cortex AI natural-language layer for PMs — no new BI tooling to learn"
+        )
+
+    bb_scale1, bb_scale2, bb_scale3 = st.columns(3)
+    bb_scale1.metric("Implementation Business", "~$100M", "Services & PM org")
+    bb_scale2.metric("Machines in Scope", "~73,000", "nationwide fleet")
+    bb_scale3.metric("Field Technicians", "8,000+", "US field force")
+
+    st.markdown("""
+<div class="insight-box">
+<strong>💡 Why this matters for the COO conversation:</strong> ATM Profitability and Services/Project
+Management look like two separate pilots today, but they are the same underlying problem — fragmented
+systems hiding revenue leakage and margin erosion until it's too late to act on. One Snowflake data
+foundation across both is what turns two point solutions into a single, enterprise-wide operational
+intelligence layer spanning Diebold's ~$100M Services business and its ATM fleet alike.
+</div>
+""", unsafe_allow_html=True)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 6 — GEOGRAPHIC VIEW
@@ -1239,6 +1321,97 @@ with tab6:
         },
         hide_index=True,
     )
+
+    st.markdown("---")
+    st.subheader("📍 Greenfield & Competitive Intelligence")
+    st.caption(
+        "⚠️ **Simulated Snowflake Marketplace data** — population, unbanked-rate, and competitor-site "
+        "counts below are synthetic and illustrative only. In production this pulls from real Marketplace "
+        "demographic, foot-traffic, and point-of-interest listings joined by zip code — the same "
+        "\"cross-reference market data to find under-served zip codes\" capability from the POC success criteria."
+    )
+
+    gf1, gf2 = st.columns([1, 1])
+    with gf1:
+        min_score = st.slider(
+            "Minimum Greenfield Score to show", min_value=0, max_value=100, value=60, step=5,
+            key="min_greenfield_score",
+        )
+    with gf2:
+        min_share_gap = st.slider(
+            "Show markets where DN share is below this %", min_value=10, max_value=60, value=40, step=5,
+            key="min_share_gap",
+        )
+
+    gf_view = market_intel_df[
+        (market_intel_df["greenfield_score"] >= min_score)
+        & (market_intel_df["dn_market_share_pct"] <= min_share_gap)
+    ].sort_values("greenfield_score", ascending=False)
+
+    g1, g2, g3 = st.columns(3)
+    g1.metric("Greenfield Markets Flagged", f"{len(gf_view):,}")
+    g2.metric("Avg DN Market Share (flagged)", f"{gf_view['dn_market_share_pct'].mean():.1f}%" if len(gf_view) else "n/a")
+    g3.metric("Combined Addressable Population", f"{gf_view['population_k'].sum():,.0f}K" if len(gf_view) else "0K")
+
+    st.markdown("**Top greenfield markets — high demand, thin DN presence, competitor-contested**")
+    st.dataframe(
+        gf_view[[
+            "region", "city", "dn_sites", "competitor_a_sites", "competitor_b_sites",
+            "dn_market_share_pct", "population_k", "unbanked_rate", "greenfield_score",
+        ]].rename(columns={
+            "region": "Region", "city": "Market", "dn_sites": "DN Sites",
+            "competitor_a_sites": "Competitor A Sites", "competitor_b_sites": "Competitor B Sites",
+            "dn_market_share_pct": "DN Share %", "population_k": "Population (000s)",
+            "unbanked_rate": "Unbanked Rate %", "greenfield_score": "Greenfield Score",
+        }),
+        use_container_width=True,
+        height=320,
+        hide_index=True,
+        column_config={
+            "DN Share %":       st.column_config.NumberColumn(format="%.1f%%"),
+            "Unbanked Rate %":  st.column_config.NumberColumn(format="%.1f%%"),
+            "Greenfield Score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f"),
+        },
+    )
+
+    st.markdown("**Competitive footprint by region — simulated market share**")
+    comp_region = (
+        market_intel_df.groupby("region")[["dn_sites", "competitor_a_sites", "competitor_b_sites"]]
+        .sum().reset_index()
+        .melt(id_vars="region", var_name="network", value_name="sites")
+    )
+    comp_region["network"] = comp_region["network"].map({
+        "dn_sites": "Diebold Nixdorf", "competitor_a_sites": "Competitor A",
+        "competitor_b_sites": "Competitor B",
+    })
+    comp_chart = (
+        alt.Chart(comp_region)
+        .mark_bar()
+        .encode(
+            x=alt.X("sites:Q", title="Sites", stack="normalize", axis=alt.Axis(format="%")),
+            y=alt.Y("region:N", title=None),
+            color=alt.Color("network:N", title=None,
+                             scale=alt.Scale(domain=["Diebold Nixdorf", "Competitor A", "Competitor B"],
+                                              range=["#00447C", "#FF6B00", "#9BC8E8"]),
+                             legend=alt.Legend(orient="bottom")),
+            tooltip=["region:N", "network:N", "sites:Q"],
+        )
+        .properties(height=220)
+    )
+    st.altair_chart(comp_chart, use_container_width=True)
+
+    if len(gf_view):
+        top = gf_view.iloc[0]
+        st.markdown(f"""
+<div class="insight-box">
+<strong>💡 Prescriptive insight:</strong> <strong>{top['city']}</strong> scores highest —
+DN holds only <strong>{top['dn_market_share_pct']:.0f}%</strong> share against an estimated
+<strong>{top['population_k']:,.0f}K</strong> population with a <strong>{top['unbanked_rate']:.1f}%</strong>
+unbanked rate, while two competitor networks are already active. This is the kind of site-placement
+decision Greenfield Opportunity Identification (Phase 2 on the roadmap) is built to rank automatically
+across the full US footprint, not just the {len(gf_view)} markets shown here.
+</div>
+""", unsafe_allow_html=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1545,8 +1718,9 @@ Consumer Interfaces
     roadmap = pd.DataFrame([
         {"Phase": "Phase 2", "Focus": "Finish Greenfield siting + Prescriptive recommendations; expand validated business questions"},
         {"Phase": "Phase 3", "Focus": "Land raw service-call, parts, and billing inputs directly in Snowflake — full automation, zero manual file handling"},
-        {"Phase": "Phase 4", "Focus": "Scale from single-geography pilot to full US footprint, then extend the same architecture to EMEA"},
-        {"Phase": "Phase 5", "Focus": "Package operational and competitive-density insights as a data product for banking clients"},
+        {"Phase": "Phase 4", "Focus": "Extend the same data foundation to Services & Project Management (order → install → reporting) — the ~$100M implementation business"},
+        {"Phase": "Phase 5", "Focus": "Scale from single-geography pilot to full US footprint, then extend the same architecture to EMEA"},
+        {"Phase": "Phase 6", "Focus": "Package operational and competitive-density insights as a data product for banking clients"},
     ])
     st.dataframe(roadmap, use_container_width=True, hide_index=True)
 
