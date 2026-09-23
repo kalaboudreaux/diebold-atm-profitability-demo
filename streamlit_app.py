@@ -273,6 +273,119 @@ def generate_market_intel(sites: pd.DataFrame) -> pd.DataFrame:
     return mi.round(1)
 
 
+@st.cache_data
+def generate_projects() -> pd.DataFrame:
+    """
+    SIMULATED Services & Project Management data: ~200 installation projects
+    spanning order → schedule → install → close. Reflects Bradley Browder's
+    Services & PM org (~$100M implementation business, ~73k machines, 8000+
+    field technicians). Source-system fragmentation (R12 vs OutSystems) is
+    modelled explicitly to illustrate the data-integration pain point.
+    """
+    random.seed(42)
+    np.random.seed(42)
+
+    regions = ["Northeast", "Southeast", "Midwest", "Southwest", "West"]
+    cities_by_region = {
+        "Northeast": ["New York", "Boston", "Philadelphia", "Pittsburgh", "Hartford"],
+        "Southeast": ["Atlanta", "Charlotte", "Miami", "Tampa", "Nashville"],
+        "Midwest":   ["Chicago", "Detroit", "Columbus", "Indianapolis", "Milwaukee"],
+        "Southwest": ["Dallas", "Houston", "Phoenix", "San Antonio", "Austin"],
+        "West":      ["Los Angeles", "San Francisco", "Seattle", "Denver", "Portland"],
+    }
+    banks = ["Citibank", "Chase", "BofA", "Wells Fargo", "PNC", "US Bank",
+             "Capital One", "Truist", "Citizens", "Fifth Third"]
+    pm_names = ["M. Torres", "J. Chen", "R. Patel", "S. Williams", "D. Kim",
+                "L. Garcia", "A. Johnson", "K. Brown", "T. Nguyen", "C. Davis"]
+    project_types = [
+        ("DN Series Recycler", 0.30),
+        ("Teller Cash Recycler", 0.25),
+        ("Branch Automation Suite", 0.20),
+        ("Legacy Replacement", 0.15),
+        ("Self-Service Terminal", 0.10),
+    ]
+    type_labels = [t[0] for t in project_types]
+    type_weights = [t[1] for t in project_types]
+    statuses_pool = ["Installed", "Installed", "Installed", "Installed", "Closed",
+                     "Closed", "In Progress", "In Progress", "Scheduled", "Ordered"]
+    delay_reasons = [None, None, None, None, None, None,
+                     "Parts Shortage", "Scheduling Conflict", "Site Not Ready",
+                     "Permitting Delay"]
+    source_systems = ["R12", "OutSystems", "Both"]
+
+    rows = []
+    for i in range(200):
+        region = random.choice(regions)
+        city = random.choice(cities_by_region[region])
+        bank = random.choice(banks)
+        pm = random.choice(pm_names)
+        ptype = random.choices(type_labels, weights=type_weights, k=1)[0]
+        status = random.choice(statuses_pool)
+        source = random.choices(source_systems, weights=[0.35, 0.30, 0.35], k=1)[0]
+
+        order_date = date(2025, 1, 1) + timedelta(days=random.randint(0, 540))
+        sla_target = random.choice([30, 45, 60, 90])
+        planned_install = order_date + timedelta(days=sla_target + random.randint(-5, 10))
+
+        machines = random.randint(3, 45)
+        planned_rev = round(machines * np.random.uniform(18_000, 42_000), 0)
+        planned_margin = round(np.random.uniform(22.0, 38.0), 1)
+
+        actual_install = None
+        actual_days = None
+        sla_met = None
+        actual_rev = planned_rev
+        actual_margin = planned_margin
+        delay = None
+
+        if status in ("Installed", "Closed"):
+            overshoot = max(0, int(np.random.normal(3, 12)))
+            actual_days = sla_target + overshoot + random.randint(-8, 5)
+            actual_install = order_date + timedelta(days=actual_days)
+            sla_met = actual_days <= sla_target
+            if not sla_met:
+                delay = random.choice([r for r in delay_reasons if r is not None])
+            # Revenue leakage: ~20% of completed projects erode
+            if random.random() < 0.20:
+                leak_pct = np.random.uniform(3.0, 12.0)
+                actual_margin = round(planned_margin - leak_pct, 1)
+                actual_rev = round(planned_rev * np.random.uniform(0.88, 0.97), 0)
+            else:
+                actual_margin = round(planned_margin + np.random.uniform(-1.5, 1.5), 1)
+                actual_rev = round(planned_rev * np.random.uniform(0.97, 1.03), 0)
+        elif status == "In Progress":
+            actual_days = (date.today() - order_date).days
+            if random.random() < 0.30:
+                delay = random.choice([r for r in delay_reasons if r is not None])
+
+        techs = max(2, int(machines * np.random.uniform(0.3, 0.8)))
+
+        rows.append({
+            "project_id": f"PRJ-{i+1:04d}",
+            "region": region,
+            "city": city,
+            "customer_bank": bank,
+            "pm_name": pm,
+            "project_type": ptype,
+            "order_date": order_date,
+            "planned_install_date": planned_install,
+            "actual_install_date": actual_install,
+            "status": status,
+            "planned_revenue": planned_rev,
+            "actual_revenue": actual_rev,
+            "planned_margin_pct": planned_margin,
+            "actual_margin_pct": actual_margin,
+            "machines_in_scope": machines,
+            "technicians_assigned": techs,
+            "sla_target_days": sla_target,
+            "actual_days": actual_days,
+            "sla_met": sla_met,
+            "source_system": source,
+            "delay_reason": delay,
+        })
+    return pd.DataFrame(rows)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD & MERGE DATA
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,6 +393,7 @@ def generate_market_intel(sites: pd.DataFrame) -> pd.DataFrame:
 sites_df   = generate_sites()
 monthly_df = generate_monthly_pl(sites_df)
 market_intel_df = generate_market_intel(sites_df)
+projects_df = generate_projects()
 
 monthly_full = monthly_df.merge(
     sites_df[[
@@ -365,7 +479,7 @@ st.markdown("""
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📊 Executive Overview",
     "🏧 Site P&L",
     "🏦 Customer Analytics",
@@ -373,6 +487,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🧭 Operational Excellence",
     "🗺️ Geographic & Greenfield",
     "🤖 AI Insights",
+    "🔧 Services & PM",
     "⚙️ Architecture & Roadmap",
 ])
 
@@ -1193,7 +1308,7 @@ into a standing prescriptive engine rather than a monthly static report.
     st.caption(
         "The same site-level data foundation extends directly to Diebold's Services & Project "
         "Management organization — the execution engine behind \"Deliver\" at a much larger scale "
-        "than ATM Profitability alone."
+        "than ATM Profitability alone. **See the 🔧 Services & PM tab for the full interactive deep-dive.**"
     )
 
     bb1, bb2 = st.columns(2)
@@ -1221,15 +1336,8 @@ into a standing prescriptive engine rather than a monthly static report.
     bb_scale2.metric("Machines in Scope", "~73,000", "nationwide fleet")
     bb_scale3.metric("Field Technicians", "8,000+", "US field force")
 
-    st.markdown("""
-<div class="insight-box">
-<strong>💡 Why this matters for the COO conversation:</strong> ATM Profitability and Services/Project
-Management look like two separate pilots today, but they are the same underlying problem — fragmented
-systems hiding revenue leakage and margin erosion until it's too late to act on. One Snowflake data
-foundation across both is what turns two point solutions into a single, enterprise-wide operational
-intelligence layer spanning Diebold's ~$100M Services business and its ATM fleet alike.
-</div>
-""", unsafe_allow_html=True)
+    st.info("👉 **Explore the full interactive Services & PM deep-dive in the 🔧 Services & PM tab** — "
+            "order-to-install pipeline, SLA diagnostics, revenue leakage simulator, and Bradley Browder's ideal-state vision.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1618,10 +1726,416 @@ or Power BI report requests.
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 8 — ARCHITECTURE
+# TAB 8 — SERVICES & PROJECT MANAGEMENT (Bradley Browder)
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab8:
+    st.subheader("Services & Project Management Intelligence")
+    st.caption(
+        "Interactive deep-dive into Diebold's ~$100M implementation business — the execution engine "
+        "behind \"Deliver.\" Synthesizes Bradley Browder's priorities, Q2 2026 earnings context, "
+        "and Frank Baur's Source → Make → Deliver framework."
+    )
+
+    # ── Section 1: Portfolio Overview ──────────────────────────────────────────
+    st.markdown("### 📋 Services Portfolio Overview")
+
+    completed_proj = projects_df[projects_df["status"].isin(["Installed", "Closed"])]
+    pipeline_proj = projects_df[projects_df["status"].isin(["Ordered", "Scheduled", "In Progress"])]
+    sla_attainment = completed_proj["sla_met"].mean() * 100 if len(completed_proj) > 0 else 0
+    avg_margin = completed_proj["actual_margin_pct"].mean() if len(completed_proj) > 0 else 0
+
+    pm1, pm2, pm3, pm4 = st.columns(4)
+    pm1.metric("Total Projects", f"{len(projects_df):,}")
+    pm2.metric("Pipeline Revenue", f"${pipeline_proj['planned_revenue'].sum():,.0f}")
+    pm3.metric("Avg Actual Margin", f"{avg_margin:.1f}%")
+    pm4.metric("SLA Attainment", f"{sla_attainment:.0f}%")
+
+    st.markdown("""
+<div class="insight-box">
+<strong>📰 Q2 2026 Earnings Context:</strong> Diebold reported <strong>record SLA attainment</strong>
+for the 2nd consecutive quarter — highest ever in North America and globally. Service revenue reached
+<strong>$549M</strong> (up from $543M YoY). North Canton lean improvements halved dispatching time
+($200K+ labor savings) and Plan-for-Every-Part is reducing incomplete service calls from missing
+parts. The <strong>$814M product backlog</strong> supports H2 revenue conversion — but Service gross
+margin remains under pressure from fleet investment.
+</div>
+""", unsafe_allow_html=True)
+
+    qs1, qs2, qs3 = st.columns(3)
+    qs1.metric("Implementation Business", "~$100M", "Services & PM org")
+    qs2.metric("Machines in Scope", "~73,000", "nationwide fleet")
+    qs3.metric("Field Technicians", "8,000+", "US field force")
+
+    # Project status breakdown
+    status_order = ["Ordered", "Scheduled", "In Progress", "Installed", "Closed"]
+    status_counts = projects_df.groupby("status").agg(
+        count=("project_id", "count"),
+        revenue=("planned_revenue", "sum")
+    ).reindex(status_order).reset_index()
+    status_counts["revenue_m"] = (status_counts["revenue"] / 1e6).round(2)
+
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        st.markdown("**Projects by Status**")
+        chart_status = alt.Chart(status_counts).mark_bar().encode(
+            x=alt.X("status:N", sort=status_order, title="Status"),
+            y=alt.Y("count:Q", title="Projects"),
+            color=alt.Color("status:N", legend=None),
+            tooltip=["status", "count", alt.Tooltip("revenue_m:Q", title="Revenue ($M)", format=".2f")],
+        ).properties(height=300)
+        st.altair_chart(chart_status, use_container_width=True)
+    with sc2:
+        st.markdown("**Pipeline Revenue by Project Type**")
+        type_rev = projects_df.groupby("project_type")["planned_revenue"].sum().reset_index()
+        type_rev["revenue_m"] = (type_rev["planned_revenue"] / 1e6).round(2)
+        chart_type = alt.Chart(type_rev).mark_bar().encode(
+            x=alt.X("revenue_m:Q", title="Planned Revenue ($M)"),
+            y=alt.Y("project_type:N", sort="-x", title=""),
+            color=alt.Color("project_type:N", legend=None),
+            tooltip=["project_type", alt.Tooltip("revenue_m:Q", format=".2f")],
+        ).properties(height=300)
+        st.altair_chart(chart_type, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── Section 2: Order-to-Install Pipeline ──────────────────────────────────
+    st.markdown("### 🔄 Order-to-Install Pipeline")
+    st.caption(
+        "Track every project from order through installation. The cycle-time simulator models "
+        "the throughput gains from lean improvements like those proven at North Canton."
+    )
+
+    completed_with_days = completed_proj[completed_proj["actual_days"].notna()].copy()
+    if len(completed_with_days) > 0:
+        avg_cycle = completed_with_days["actual_days"].mean()
+        median_cycle = completed_with_days["actual_days"].median()
+    else:
+        avg_cycle = 45
+        median_cycle = 42
+
+    cy1, cy2 = st.columns(2)
+    cy1.metric("Avg Cycle Time", f"{avg_cycle:.0f} days")
+    cy2.metric("Median Cycle Time", f"{median_cycle:.0f} days")
+
+    # Interactive: Cycle-time reduction simulator
+    st.markdown("#### 🎛️ Cycle-Time Reduction Simulator")
+    cycle_reduction = st.slider(
+        "Cycle-time improvement (%)",
+        min_value=0, max_value=50, value=15, step=5,
+        help="Model the impact of lean improvements (dispatching, Plan-for-Every-Part) on install throughput.",
+        key="cycle_reduction_pct",
+    )
+
+    new_cycle = avg_cycle * (1 - cycle_reduction / 100)
+    quarterly_capacity_current = 90 / avg_cycle * len(pipeline_proj) if avg_cycle > 0 else 0
+    quarterly_capacity_new = 90 / new_cycle * len(pipeline_proj) if new_cycle > 0 else 0
+    throughput_gain = quarterly_capacity_new - quarterly_capacity_current
+    revenue_acceleration = throughput_gain * (pipeline_proj["planned_revenue"].mean() if len(pipeline_proj) > 0 else 0)
+
+    cr1, cr2, cr3 = st.columns(3)
+    cr1.metric("New Avg Cycle", f"{new_cycle:.0f} days", f"{-cycle_reduction}%")
+    cr2.metric("Throughput Gain", f"+{throughput_gain:.0f} projects/qtr")
+    cr3.metric("Revenue Acceleration", f"${revenue_acceleration:,.0f}", "per quarter")
+
+    st.markdown("""
+<div class="insight-box">
+<strong>💡 Lean validation:</strong> North Canton already proved dispatching time can be cut >50%
+with $200K+ labor savings. Receiving and shipping accelerated ~2 days. This simulator extends
+that proven improvement to the full install pipeline — the same DNAccelerator discipline, now
+quantified at the project level.
+</div>
+""", unsafe_allow_html=True)
+
+    # Cycle time distribution
+    if len(completed_with_days) > 0:
+        st.markdown("**Cycle-Time Distribution (Completed Projects)**")
+        cycle_hist = alt.Chart(completed_with_days).mark_bar(opacity=0.7).encode(
+            x=alt.X("actual_days:Q", bin=alt.Bin(maxbins=20), title="Days to Install"),
+            y=alt.Y("count():Q", title="Projects"),
+            tooltip=["count()"],
+        ).properties(height=250)
+        sla_rule = alt.Chart(pd.DataFrame({"x": [completed_with_days["sla_target_days"].median()]})).mark_rule(
+            color="red", strokeDash=[5, 5]
+        ).encode(x="x:Q")
+        st.altair_chart(cycle_hist + sla_rule, use_container_width=True)
+        st.caption("Red dashed line = median SLA target")
+
+    st.markdown("---")
+
+    # ── Section 3: SLA & Install Performance Diagnostics ──────────────────────
+    st.markdown("### 🎯 SLA & Install Performance Diagnostics")
+    st.caption(
+        "Prescriptive scan — mirrors the ATM diagnostics pattern (Tab 4) but for install projects. "
+        "Identifies at-risk projects by SLA breach severity and margin erosion."
+    )
+
+    diag1, diag2 = st.columns(2)
+    with diag1:
+        sla_breach_threshold = st.slider(
+            "SLA breach trigger: days over target",
+            min_value=1, max_value=30, value=5, step=1,
+            key="sla_breach_threshold",
+        )
+    with diag2:
+        margin_erosion_trigger = st.slider(
+            "Margin erosion trigger: pts below plan",
+            min_value=1, max_value=15, value=3, step=1,
+            key="margin_erosion_trigger",
+        )
+
+    run_sla_scan = st.button("🔍 Run SLA Diagnostic Scan", key="sla_scan_run")
+
+    if run_sla_scan or st.session_state.get("sla_scan_run"):
+        # Flag at-risk projects
+        diag_df = completed_proj.copy()
+        diag_df["days_over_sla"] = diag_df["actual_days"].fillna(0) - diag_df["sla_target_days"]
+        diag_df["margin_erosion"] = diag_df["planned_margin_pct"] - diag_df["actual_margin_pct"]
+
+        sla_breach = diag_df["days_over_sla"] >= sla_breach_threshold
+        margin_breach = diag_df["margin_erosion"] >= margin_erosion_trigger
+
+        diag_df["issue"] = "None"
+        diag_df.loc[sla_breach & ~margin_breach, "issue"] = "SLA Breach"
+        diag_df.loc[~sla_breach & margin_breach, "issue"] = "Margin Erosion"
+        diag_df.loc[sla_breach & margin_breach, "issue"] = "SLA + Margin"
+
+        flagged = diag_df[diag_df["issue"] != "None"].sort_values("days_over_sla", ascending=False)
+
+        fm1, fm2, fm3 = st.columns(3)
+        fm1.metric("Projects Scanned", f"{len(diag_df):,}")
+        fm2.metric("Flagged", f"{len(flagged):,}", f"{len(flagged)/len(diag_df)*100:.0f}% of completed" if len(diag_df) > 0 else "")
+        fm3.metric("Total Margin at Risk",
+                   f"${(flagged['planned_revenue'] * flagged['margin_erosion'] / 100).sum():,.0f}")
+
+        sla_list_tab, sla_action_tab = st.tabs(["📋 Full flagged list", "📝 Action cards — top 5"])
+
+        with sla_list_tab:
+            show_cols = ["project_id", "region", "customer_bank", "project_type", "pm_name",
+                         "status", "sla_target_days", "actual_days", "days_over_sla",
+                         "planned_margin_pct", "actual_margin_pct", "margin_erosion",
+                         "delay_reason", "source_system", "issue"]
+            st.dataframe(flagged[show_cols], use_container_width=True, hide_index=True)
+
+        with sla_action_tab:
+            top5 = flagged.head(5)
+            for _, proj in top5.iterrows():
+                with st.expander(f"🚨 {proj['project_id']} — {proj['customer_bank']} ({proj['issue']})"):
+                    ac1, ac2 = st.columns(2)
+                    ac1.metric("Days Over SLA", f"{proj['days_over_sla']:.0f}")
+                    ac2.metric("Margin Erosion", f"{proj['margin_erosion']:.1f} pts")
+                    st.markdown(f"**Region:** {proj['region']} · **PM:** {proj['pm_name']}")
+                    st.markdown(f"**Type:** {proj['project_type']} · **Machines:** {proj['machines_in_scope']}")
+                    st.markdown(f"**Source System:** {proj['source_system']}")
+                    if proj["delay_reason"]:
+                        st.warning(f"Delay reason: **{proj['delay_reason']}**")
+                    # Prescriptive recommendation
+                    if proj["issue"] == "SLA Breach" or proj["issue"] == "SLA + Margin":
+                        st.info(
+                            "**Recommendation:** Escalate to regional dispatch lead. Review "
+                            "parts availability (Plan-for-Every-Part) and tech scheduling. "
+                            "Consider reallocating technicians from lower-priority installs."
+                        )
+                    if proj["issue"] == "Margin Erosion" or proj["issue"] == "SLA + Margin":
+                        st.info(
+                            "**Recommendation:** Flag for mid-project revenue review. Compare "
+                            "actual vs. quoted scope — identify change orders not captured. "
+                            "Validate billing milestones against install progress."
+                        )
+
+        # Delay reason breakdown
+        delayed = flagged[flagged["delay_reason"].notna()]
+        if len(delayed) > 0:
+            st.markdown("**Delay Reason Breakdown (Flagged Projects)**")
+            delay_counts = delayed.groupby("delay_reason").size().reset_index(name="count")
+            delay_chart = alt.Chart(delay_counts).mark_bar().encode(
+                x=alt.X("count:Q", title="Projects"),
+                y=alt.Y("delay_reason:N", sort="-x", title=""),
+                color=alt.Color("delay_reason:N", legend=None),
+                tooltip=["delay_reason", "count"],
+            ).properties(height=200)
+            st.altair_chart(delay_chart, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── Section 4: Revenue Leakage & Margin Erosion ───────────────────────────
+    st.markdown("### 💰 Revenue Leakage & Margin Erosion")
+    st.caption(
+        "Quantifies the gap between planned and actual project economics. Bradley Browder has flagged "
+        "revenue leakage as a top priority — this section instruments it."
+    )
+
+    eroded = completed_proj[completed_proj["actual_margin_pct"] < completed_proj["planned_margin_pct"] - 1].copy()
+    eroded["margin_gap"] = eroded["planned_margin_pct"] - eroded["actual_margin_pct"]
+    eroded["revenue_leak"] = eroded["planned_revenue"] - eroded["actual_revenue"]
+    total_leakage = eroded["revenue_leak"].sum()
+    total_margin_loss = (eroded["planned_revenue"] * eroded["margin_gap"] / 100).sum()
+
+    le1, le2, le3 = st.columns(3)
+    le1.metric("Projects with Erosion", f"{len(eroded):,}",
+              f"{len(eroded)/len(completed_proj)*100:.0f}% of completed" if len(completed_proj) > 0 else "")
+    le2.metric("Total Revenue Leakage", f"${total_leakage:,.0f}")
+    le3.metric("Total Margin Loss", f"${total_margin_loss:,.0f}")
+
+    # Scatter: planned vs actual margin
+    if len(completed_proj) > 0:
+        scatter_df = completed_proj.copy()
+        scatter_df["leaked"] = scatter_df["actual_margin_pct"] < (scatter_df["planned_margin_pct"] - 1)
+        scatter = alt.Chart(scatter_df).mark_circle(size=60, opacity=0.7).encode(
+            x=alt.X("planned_margin_pct:Q", title="Planned Margin %"),
+            y=alt.Y("actual_margin_pct:Q", title="Actual Margin %"),
+            color=alt.Color("leaked:N", scale=alt.Scale(domain=[False, True], range=["#4CAF50", "#F44336"]),
+                            legend=alt.Legend(title="Erosion")),
+            tooltip=["project_id", "customer_bank", "project_type",
+                     alt.Tooltip("planned_margin_pct:Q", format=".1f"),
+                     alt.Tooltip("actual_margin_pct:Q", format=".1f")],
+        ).properties(height=350)
+        # Diagonal reference line
+        diag_line = alt.Chart(pd.DataFrame({"x": [15, 45], "y": [15, 45]})).mark_line(
+            color="gray", strokeDash=[5, 5], opacity=0.5
+        ).encode(x="x:Q", y="y:Q")
+        st.altair_chart(scatter + diag_line, use_container_width=True)
+        st.caption("Points below the diagonal = margin erosion. Red = erosion >1 pt.")
+
+    # What-if: leakage recovery
+    st.markdown("#### 🎛️ Revenue Recovery Simulator")
+    recovery_pct = st.slider(
+        "If this % of leakage is caught mid-project",
+        min_value=0, max_value=100, value=50, step=10,
+        key="leakage_recovery_pct",
+    )
+    recovered_rev = total_leakage * recovery_pct / 100
+    recovered_margin = total_margin_loss * recovery_pct / 100
+
+    rv1, rv2 = st.columns(2)
+    rv1.metric("Revenue Recovered", f"${recovered_rev:,.0f}", f"{recovery_pct}% catch rate")
+    rv2.metric("Margin Recovered", f"${recovered_margin:,.0f}", f"{recovery_pct}% catch rate")
+
+    st.markdown("""
+<div class="insight-box">
+<strong>💡 Why mid-project visibility matters:</strong> Today, late-cycle margin swings surface only
+at financial close — by then it's too late to act. A unified data layer catches scope creep,
+missed billing milestones, and unlogged change orders <em>while the project is still active</em>,
+not in the post-mortem. This directly addresses Bradley Browder's top priority: instrumenting
+revenue leakage before it becomes a write-off.
+</div>
+""", unsafe_allow_html=True)
+
+    # Source-system fragmentation
+    st.markdown("**Source-System Fragmentation**")
+    src_counts = projects_df.groupby("source_system").size().reset_index(name="count")
+    src_chart = alt.Chart(src_counts).mark_arc(innerRadius=50).encode(
+        theta=alt.Theta("count:Q"),
+        color=alt.Color("source_system:N", scale=alt.Scale(
+            domain=["R12", "OutSystems", "Both"],
+            range=["#FF6B6B", "#FFA726", "#66BB6A"]
+        ), legend=alt.Legend(title="Source")),
+        tooltip=["source_system", "count"],
+    ).properties(height=250)
+    st.altair_chart(src_chart, use_container_width=True)
+    r12_only = src_counts[src_counts["source_system"] == "R12"]["count"].sum()
+    os_only = src_counts[src_counts["source_system"] == "OutSystems"]["count"].sum()
+    both = src_counts[src_counts["source_system"] == "Both"]["count"].sum()
+    st.caption(
+        f"R12 only: {r12_only} projects · OutSystems only: {os_only} · Both: {both} — "
+        f"only {both}/{len(projects_df)} ({both/len(projects_df)*100:.0f}%) have a complete picture across systems."
+    )
+
+    st.markdown("---")
+
+    # ── Section 5: Current State → Ideal State ────────────────────────────────
+    st.markdown("### 🧭 Current State → Ideal State")
+    st.caption(
+        "Bradley Browder's vision: from fragmented systems to a unified, real-time operational "
+        "intelligence layer for the Services & PM org."
+    )
+
+    vis1, vis2 = st.columns(2)
+    with vis1:
+        st.markdown("#### ⚠️ Current State")
+        st.error(
+            "**Disconnected Systems**\n"
+            "- Orders tracked in **R12** (Oracle ERP)\n"
+            "- Project execution in **OutSystems** (low-code platform)\n"
+            "- No integration between order and install systems\n\n"
+            "**Manual Processes**\n"
+            "- Heavy manual data entry & reconciliation\n"
+            "- Revenue/cost data stitched together in spreadsheets\n"
+            "- Reporting lags behind reality by weeks\n\n"
+            "**Blind Spots**\n"
+            "- No real-time order → install → reporting visibility\n"
+            "- Margin swings surface only at financial close\n"
+            "- Revenue leakage not instrumented — flagged but unmeasured"
+        )
+    with vis2:
+        st.markdown("#### ✅ Ideal State (Snowflake Platform)")
+        st.success(
+            "**Unified Data Layer**\n"
+            "- R12 + OutSystems + Salesforce → Snowflake\n"
+            "- Same grain as ATM site P&L — project-level economics\n"
+            "- Real-time ingestion via Snowpipe / connectors\n\n"
+            "**Prescriptive Intelligence**\n"
+            "- SLA breach alerts before deadline, not after\n"
+            "- Revenue leakage flagged mid-project, not at close\n"
+            "- Technician routing optimization (same model as ATM service calls)\n\n"
+            "**Self-Service for PMs**\n"
+            "- Cortex AI natural-language queries — no new BI tool to learn\n"
+            "- Dashboards that update daily, not monthly\n"
+            "- Every PM sees their portfolio in real time"
+        )
+
+    st.markdown("**What Snowflake Replaces**")
+    st.code("""
+Current:                              Future:
+┌─────────┐  ┌─────────────┐          ┌──────────────────────────────────┐
+│  R12    │  │ OutSystems  │          │        Snowflake Platform        │
+│ (Orders)│  │ (Execution) │          │                                  │
+└────┬────┘  └──────┬──────┘          │  R12 ──┐                         │
+     │              │                 │  OS  ──┤──→ Unified Project      │
+     ▼              ▼                 │  SFDC ─┘    Data Model           │
+┌──────────────────────┐              │         │                        │
+│  Manual Spreadsheet  │              │         ▼                        │
+│  Reconciliation      │              │  Dynamic Tables → Real-Time P&L  │
+│  (monthly, fragile)  │              │  Cortex AI → NL Queries for PMs  │
+└──────────┬───────────┘              │  Prescriptive Alerts → SLA/Rev   │
+           ▼                          └──────────────────────────────────┘
+┌──────────────────────┐
+│  Month-End Report    │
+│  (too late to act)   │
+└──────────────────────┘
+""", language="text")
+
+    st.markdown("""
+<div class="insight-box">
+<strong>📰 Q2 Earnings Validation:</strong> Record SLA attainment proves the operational discipline
+exists. North Canton's lean transformation ($200K+ savings, dispatching time halved) proves the
+methodology works. What's missing is the <strong>unified data foundation</strong> that scales these
+local wins across every region — from North Canton to every field office, from one plant's
+Plan-for-Every-Part to a fleet-wide prescriptive parts-planning engine.
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("""
+<div class="insight-box">
+<strong>🧭 Strategic Alignment:</strong> This is Frank Baur's <em>Source → Make → Deliver</em>
+framework applied to Services at scale:
+<ul>
+  <li><strong>Source:</strong> Unified parts and vendor data — Plan-for-Every-Part goes digital</li>
+  <li><strong>Make:</strong> Project economics visible in real time, not at month-end</li>
+  <li><strong>Deliver:</strong> SLA and install performance tracked project-by-project, prescriptive alerts for at-risk installs</li>
+</ul>
+One Snowflake data foundation across ATM Profitability <em>and</em> Services/PM turns two separate
+initiatives into a single enterprise-wide operational intelligence layer — spanning the ~$100M
+implementation business and the nationwide ATM fleet alike.
+</div>
+""", unsafe_allow_html=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 9 — ARCHITECTURE
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab9:
     st.subheader("Solution Architecture")
     st.caption("Replacing the current Alteryx + Power BI stack with Snowflake + Cortex AI")
 
@@ -1718,7 +2232,7 @@ Consumer Interfaces
     roadmap = pd.DataFrame([
         {"Phase": "Phase 2", "Focus": "Finish Greenfield siting + Prescriptive recommendations; expand validated business questions"},
         {"Phase": "Phase 3", "Focus": "Land raw service-call, parts, and billing inputs directly in Snowflake — full automation, zero manual file handling"},
-        {"Phase": "Phase 4", "Focus": "Extend the same data foundation to Services & Project Management (order → install → reporting) — the ~$100M implementation business"},
+        {"Phase": "Phase 4", "Focus": "Services & PM integration — order → install → reporting unified in Snowflake (see 🔧 Services & PM tab for interactive deep-dive)"},
         {"Phase": "Phase 5", "Focus": "Scale from single-geography pilot to full US footprint, then extend the same architecture to EMEA"},
         {"Phase": "Phase 6", "Focus": "Package operational and competitive-density insights as a data product for banking clients"},
     ])
